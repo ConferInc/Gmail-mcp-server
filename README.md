@@ -57,13 +57,17 @@ Add this to your config file, make sure to give path of server.py
   }
 }
 ```
-like this : <img width="632" height="202" alt="image" src="https://github.com/user-attachments/assets/f051873a-92e7-41be-a8d4-87730280a676" />
+
 
 *Note: Replace `<ABSOLUTE_PATH_TO_REPO>` with the actual full path to this directory.*
 
 Now paste the config in your mcp.json file. to use the server in IDE
 
+like this :
+<img width="632" height="202" alt="image" src="https://github.com/user-attachments/assets/f051873a-92e7-41be-a8d4-87730280a676" />
+
 Next refresh your IDE and you should be able to use the server.
+
 
 ### Test with MCP Inspector
 ```bash
