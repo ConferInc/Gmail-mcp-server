@@ -8,13 +8,8 @@ from auth import get_gmail_credentials
 from gmail_client import GmailClient
 
 mcp = FastMCP("gmail-mcp-server")
-_client = None
-
 def client():
-    global _client
-    if not _client:
-        _client = GmailClient(get_gmail_credentials())
-    return _client
+    return GmailClient(get_gmail_credentials())
 
 
 @mcp.tool()
@@ -30,9 +25,18 @@ def read_email(message_id: str) -> dict:
 
 
 @mcp.tool()
-def send_email(to: str, subject: str, body: str) -> dict:
-    """⚠️ SENDS A REAL EMAIL! Composes and sends from your Gmail."""
-    return client().send_message(to, subject, body)
+def create_draft(to: str, subject: str, body: str) -> str:
+    """Create a draft email. User must review and approve this draft before it is sent using send_draft."""
+    result = client().create_draft(to, subject, body)
+    if result.get("success"):
+        return f"Draft created with ID: {result.get('draft_id')}. Please ask the user to review and confirm to send."
+    return f"Failed to create draft: {result.get('error')}"
+
+
+@mcp.tool()
+def send_draft(draft_id: str) -> dict:
+    """Sends a draft email. Use this ONLY after the user has confirmed they want to send the draft."""
+    return client().send_draft(draft_id)
 
 
 @mcp.prompt()
@@ -56,7 +60,7 @@ def compose_email(to: str, purpose: str, tone: str = "professional") -> str:
     """Help compose a new email."""
     return f"""Compose a {tone} email to {to} for: {purpose}.
 Include a clear subject line, proper greeting, concise body, and professional closing.
-Show the complete draft and confirm with user before using send_email tool."""
+Show the complete draft and confirm with user before using create_draft tool."""
 
 
 @mcp.prompt()

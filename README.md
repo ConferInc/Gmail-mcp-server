@@ -7,7 +7,8 @@ MCP server for Gmail integration with Claude, Cursor, Kiro, and other MCP client
 |------|-------------|
 | `list_emails` | List/search emails (returns id, snippet, subject, from, date) |
 | `read_email` | Read full email content by ID |
-| `send_email` | Send a real email ⚠️ |
+| `create_draft` | Create a draft email (requires `send_draft` to actually send) |
+| `send_draft` | Send a drafted email |
 
 ## Prompts
 | Prompt | Description |
@@ -20,7 +21,7 @@ MCP server for Gmail integration with Claude, Cursor, Kiro, and other MCP client
 
 ---
 
-## Setup
+## Setup Details for running it locally
 
 ### 1. Install Dependencies
 ```bash
@@ -31,7 +32,7 @@ pip install -r requirements.txt
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
 2. Create project → Enable **Gmail API**
 3. **APIs & Services** → **Credentials** → **Create OAuth Client ID** → **Desktop App**
-4. Download JSON → rename to `credentials.json` → place in this folder
+4. Download JSON → rename to `credentials.json` → place in this folder (gmail-mcp-server)
 
 ### 3. Authenticate (one-time)
 ```bash
@@ -43,34 +44,22 @@ This opens browser for Google login and creates `token.json`.
 
 ## Running the Server
 
-### With Kiro
-Add to `.kiro/settings/mcp.json`:
+Add this to your config file:
+
 ```json
 {
   "mcpServers": {
     "gmail": {
       "command": "python",
-      "args": ["D:/path/to/gmail-mcp-server/server.py"]
+      "args": ["<ABSOLUTE_PATH_TO_REPO>/server.py"]
     }
   }
 }
 ```
+*Note: Replace `<ABSOLUTE_PATH_TO_REPO>` with the actual full path to this directory.*
+Now paste the config in your mcp.json file. to use the server in IDE
 
-### With Cursor
-Open this folder in Cursor - `.cursor/mcp.json` is pre-configured.
-
-### With Claude Desktop
-Add to `%APPDATA%\Claude\claude_desktop_config.json`:
-```json
-{
-  "mcpServers": {
-    "gmail": {
-      "command": "python",
-      "args": ["D:/path/to/gmail-mcp-server/server.py"]
-    }
-  }
-}
-```
+Next refresh your IDE and you should be able to use the server.
 
 ### Test with MCP Inspector
 ```bash
@@ -91,6 +80,15 @@ gmail-mcp-server/
 └── requirements.txt   # Dependencies
 ```
 
-## Security
-- Keep `credentials.json` and `token.json` private
-- `send_email` sends real emails - use carefully
+## Security - IMPORTANT
+
+*   **`credentials.json`**: This file identifies the **Application** (the code), NOT you.
+    *   *Risk Level*: Low.
+    *   *If shared*: Someone can run the app pretending to be your project, but they **cannot** access your emails without logging in.
+*   **`token.json`**: This file contains the **Access Keys** to your specific Gmail account.
+    *   *Risk Level*: **CRITICAL**.
+    *   *If shared*: Someone **CAN** read and send emails as you.
+    *   **NEVER SHARE `token.json`.** Ensure it is in your `.gitignore` (it is by default in this repo).
+
+- `send_draft` sends real emails - use carefully
+

@@ -1,6 +1,7 @@
 """Gmail API Client."""
 
 import base64
+import re
 from email.mime.text import MIMEText
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -44,7 +45,30 @@ class GmailClient:
         except HttpError as e:
             return self._err(e)
     
+
+    
+    def create_draft(self, to, subject, body):
+        if not self._validate_email(to):
+            return {"success": False, "error": f"Invalid email format: {to}"}
+        try:
+            msg = MIMEText(body)
+            msg["to"], msg["subject"] = to, subject
+            b = {"raw": base64.urlsafe_b64encode(msg.as_bytes()).decode()}
+            d = self.svc.users().drafts().create(userId="me", body={"message": b}).execute()
+            return {"success": True, "draft_id": d.get("id", ""), "message_id": d.get("message", {}).get("id", "")}
+        except HttpError as e:
+            return self._err(e)
+
+    def send_draft(self, draft_id):
+        try:
+            r = self.svc.users().drafts().send(userId="me", body={"id": draft_id}).execute()
+            return {"success": True, "message_id": r.get("id", ""), "thread_id": r.get("threadId", "")}
+        except HttpError as e:
+            return self._err(e)
+
     def send_message(self, to, subject, body):
+        if not self._validate_email(to):
+            return {"success": False, "error": f"Invalid email format: {to}"}
         try:
             msg = MIMEText(body)
             msg["to"], msg["subject"] = to, subject
@@ -54,6 +78,11 @@ class GmailClient:
             return {"success": True, "message_id": r.get("id", ""), "thread_id": r.get("threadId", "")}
         except HttpError as e:
             return self._err(e)
+
+    def _validate_email(self, email):
+        # Basic regex for email validation
+        pattern = r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$"
+        return re.match(pattern, email) is not None
     
     def _body(self, p):
         if d := p.get("body", {}).get("data"):
