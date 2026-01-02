@@ -1,17 +1,18 @@
-# Use an official Python runtime as a parent image
+# Use official Python runtime as a parent image
 FROM python:3.11-slim
 
-# Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
-# Copy the requirements file into the container at /app
-COPY requirements.txt /app/
-
-# Install any needed packages specified in requirements.txt
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the current directory contents into the container at /app
-COPY . /app
+# Copy the rest of the application code
+COPY . .
 
-# Define the command to run the application
-CMD ["python", "server.py"]
+# Expose port (FastMCP/Uvicorn default is often 8000)
+EXPOSE 8000
+
+# Run the server using Uvicorn
+CMD ["uvicorn", "server:mcp", "--host", "0.0.0.0", "--port", "8000"]

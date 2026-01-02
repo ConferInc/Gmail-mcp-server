@@ -1,33 +1,25 @@
+# Secrets (CRITICAL)
+credentials.json
+token.json
+.env
+*.env
+
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
-*.so
-*.egg-info/
-dist/
-build/
-
-# Virtual environments
-.env
-.venv
-env/
 venv/
+.venv/
+env/
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# Logs
+*.log
+npm-debug.log*
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Gmail MCP Server - Sensitive files
-credentials.json
-token.json
-*.log
-
-# Local config
-config.local.json
-.env.local
+# IDE
+.vscode/
+.idea/

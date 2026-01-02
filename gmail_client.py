@@ -12,6 +12,9 @@ class GmailClient:
         self.svc = build("gmail", "v1", credentials=creds, cache_discovery=False)
     
     def list_messages(self, query="", max_results=10):
+        if not isinstance(max_results, int) or max_results < 1:
+            return {"success": False, "error": "max_results must be a positive integer"}
+            
         try:
             msgs = self.svc.users().messages().list(
                 userId="me", q=query, maxResults=min(100, max(1, max_results))
@@ -33,6 +36,9 @@ class GmailClient:
             return self._err(e)
     
     def get_message_detail(self, msg_id):
+        if not msg_id or not isinstance(msg_id, str):
+            return {"success": False, "error": "Invalid message_id"}
+            
         try:
             m = self.svc.users().messages().get(userId="me", id=msg_id, format="full").execute()
             h = {x["name"]: x["value"] for x in m.get("payload", {}).get("headers", [])}
@@ -93,6 +99,20 @@ class GmailClient:
             if b := self._body(part): return b
         return ""
     
+
     def _err(self, e):
         s = e.resp.status
-        return {"success": False, "error": {401: "Token expired", 403: "Permission denied", 404: "Not found", 429: "Rate limited"}.get(s, f"API error ({s})")}
+        # Detailed error mapping
+        errors = {
+            400: "Bad Request - Invalid query or parameters",
+            401: "Token expired or invalid auth - Try re-authenticating",
+            403: "Permission denied - Check scopes or quota exceeded",
+            404: "Resource not found - Email/Draft may have been deleted",
+            429: "Rate limited - Too many requests",
+            500: "Gmail API Server Error"
+        }
+        err_msg = errors.get(s, f"Gmail API error ({s})")
+        
+        import logging
+        logging.getLogger(__name__).error(f"Gmail API Failure: {err_msg} details={e}")
+        return {"success": False, "error": err_msg}

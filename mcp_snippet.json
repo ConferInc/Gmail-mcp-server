@@ -1,0 +1,14 @@
+{
+     "mcpServers": {
+          "gmail": {
+               "command": "python",
+               "args": [
+                    "d:/ConferAI/30 -DEC/gmail-mcp-server/server.py"
+               ],
+               "env": {
+                    "GMAIL_CREDENTIALS_PATH": "d:/ConferAI/30 -DEC/gmail-mcp-server/credentials.json",
+                    "GMAIL_TOKEN_PATH": "d:/ConferAI/30 -DEC/gmail-mcp-server/token.json"
+               }
+          }
+     }
+}
