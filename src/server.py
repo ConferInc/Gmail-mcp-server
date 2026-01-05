@@ -21,7 +21,7 @@ except ImportError:
     from utils import find_folder, extract_email_body, parse_folder_line, check_attachment
 
 # Initialize FastMCP Server
-mcp = FastMCP("Custom Email MCP")
+mcp = FastMCPzz("Custom Email MCP")
 # Configure Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ async def check_connection() -> dict:
 
     # Check SMTP
     try:
-        logger.info(f"Connecting to SMTP: {config.SMTP_HOST}:{config.SMTP_PORT}")
+        logger.info(f"Connecting to SMTP: {config.SMTP_HOST}:{config.SMTP_PORT})
         
         use_tls = config.SMTP_PORT == 465
         
