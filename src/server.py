@@ -33,7 +33,8 @@ logger = logging.getLogger(__name__)
 
 # Security: Generate a random token for the setup link
 SETUP_TOKEN = secrets.token_urlsafe(16)
-logger.info(f"Setup Token: {SETUP_TOKEN}")
+logger.debug("Setup token generated (length=%d)", len(SETUP_TOKEN))
+
 
 @mcp.tool()
 async def get_configuration_link() -> str:
@@ -60,7 +61,6 @@ async def setup_page(request: Request):
     template_path = Path(__file__).parent / "templates" / "setup.html"
     try:
         html_content = template_path.read_text(encoding="utf-8")
-        # Simple injection
         html_content = html_content.replace("{{TOKEN}}", SETUP_TOKEN)
         return HTMLResponse(html_content)
     except Exception as e:
@@ -145,8 +145,6 @@ async def check_connection() -> dict:
     # Check IMAP
     try:
         logger.info(f"Connecting to IMAP: {config.IMAP_HOST}:{config.IMAP_PORT}")
-        # aioimaplib doesn't have a context manager for connection in the same way, need to be careful
-        # SSL context might be needed
         ssl_context = ssl.create_default_context()
         imap_client = aioimaplib.IMAP4_SSL(host=config.IMAP_HOST, port=config.IMAP_PORT, ssl_context=ssl_context)
         await imap_client.wait_hello_from_server()
@@ -347,8 +345,7 @@ async def read_email(email_id: str, folder: str = "INBOX") -> str:
         content = ""
         
         if status == 'OK':
-            # Data structure is complex: [b'SEQ (RFC822 {size}', b'raw content', b')']
-            # We want the middle part which is the raw content.
+
 
             
             raw_email = b""
@@ -356,7 +353,6 @@ async def read_email(email_id: str, folder: str = "INBOX") -> str:
             for part in data:
                  if isinstance(part, (bytes, bytearray)):
                      part_bytes = bytes(part)
-                     # Skip the command response lines if possible, or naive check
                      if b"RFC822" in part_bytes and part_bytes.strip().endswith(b"}"):
                          continue
                      if part_bytes.strip() == b")":
