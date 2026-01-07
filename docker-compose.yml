@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      - SMTP_HOST=smtp.example.com
+      - SMTP_PORT=465
+      - IMAP_HOST=imap.example.com
+      - IMAP_PORT=993
+      - EMAIL_USER=user@example.com
+      # It is recommended to set secrets in the Coolify UI, but this key is here for reference
+      - EMAIL_PASS=your_password
+    restart: unless-stopped

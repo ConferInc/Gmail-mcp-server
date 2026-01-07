@@ -5,4 +5,4 @@ venv/
 .vscode/
 dist/
 .DS_Store
-PRD
+/PRD

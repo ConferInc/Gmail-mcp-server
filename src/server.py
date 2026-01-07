@@ -5,7 +5,12 @@ import logging
 import time
 import aiosmtplib
 import aioimaplib
+import secrets
+from pathlib import Path
+from starlette.responses import HTMLResponse, JSONResponse
+from starlette.requests import Request
 from fastmcp import FastMCP
+
 
 from email.policy import default
 from email.message import EmailMessage
@@ -26,12 +31,91 @@ mcp = FastMCP("Custom Email MCP")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Security: Generate a random token for the setup link
+SETUP_TOKEN = secrets.token_urlsafe(16)
+logger.info(f"Setup Token: {SETUP_TOKEN}")
+
+@mcp.tool()
+async def get_configuration_link() -> str:
+    """
+    Returns a secure link to configure the server via browser.
+    """
+    base_url = config.APP_URL or "http://localhost:8000"
+    # Remove trailing slash if present
+    base_url = base_url.rstrip("/")
+    
+    link = f"{base_url}/setup?token={SETUP_TOKEN}"
+    
+    if not config.APP_URL:
+        return f"Link: {link} \n(Note: Set APP_URL env var in Coolify to your domain to get a correct public link)"
+    return f"Click here to configure: {link}"
+
+@mcp.custom_route("/setup", methods=["GET"])
+async def setup_page(request: Request):
+    token = request.query_params.get("token")
+    if token != SETUP_TOKEN:
+        return HTMLResponse("<h1>Invalid or missing token</h1>", status_code=403)
+    
+    # Load template
+    template_path = Path(__file__).parent / "templates" / "setup.html"
+    try:
+        html_content = template_path.read_text(encoding="utf-8")
+        # Simple injection
+        html_content = html_content.replace("{{TOKEN}}", SETUP_TOKEN)
+        return HTMLResponse(html_content)
+    except Exception as e:
+        logger.error(f"Template parsing error: {e}")
+        return HTMLResponse("<h1>Error loading template</h1>", status_code=500)
+
+@mcp.custom_route("/setup", methods=["POST"])
+async def handle_setup(request: Request):
+    token = request.query_params.get("token")
+    if token != SETUP_TOKEN:
+        return JSONResponse({"error": "Invalid token"}, status_code=403)
+    
+    form_data = await request.form()
+    
+    try:
+        config.save_to_file(
+            smtp_host=form_data.get("smtp_host"),
+            smtp_port=int(form_data.get("smtp_port")),
+            imap_host=form_data.get("imap_host"),
+            imap_port=int(form_data.get("imap_port")),
+            email_user=form_data.get("email_user"),
+            email_pass=form_data.get("email_pass")
+        )
+        return HTMLResponse("<h1>Configuration Saved!</h1><p>You can close this window and start using the agent.</p>")
+    except Exception as e:
+        return HTMLResponse(f"<h1>Error</h1><p>{e}</p>", status_code=500)
+
+@mcp.tool()
+async def configure_email(
+    email_user: str, 
+    email_pass: str, 
+    smtp_host: str = "smtp.gmail.com", 
+    smtp_port: int = 465, 
+    imap_host: str = "imap.gmail.com", 
+    imap_port: int = 993
+) -> str:
+    """
+    Configures the email server with credentials. 
+    This is persistent and saves to a file on the server.
+    """
+    try:
+        config.save_to_file(smtp_host, smtp_port, imap_host, imap_port, email_user, email_pass)
+        return "✅ Configuration saved successfully. You can now use email tools."
+    except Exception as e:
+        return f"❌ Failed to save configuration: {e}"
+
 @mcp.tool()
 async def check_connection() -> dict:
     """
     Validates the ability to connect and authenticate with both SMTP and IMAP servers.
     Returns a dictionary with status checks and latency stats.
     """
+    if not config.is_configured:
+        return {"error": "Server not configured. Please use `configure_email` first."}
+
     results = {
         "smtp": {"status": "pending", "host": config.SMTP_HOST},
         "imap": {"status": "pending", "host": config.IMAP_HOST}
@@ -92,6 +176,9 @@ async def list_folders() -> list[dict]:
     Returns:
         List of dictionaries containing 'name' and 'flags' for each folder.
     """
+    if not config.is_configured:
+        return [{"error": "Server not configured. Please use `configure_email` first."}]
+
     try:
         ssl_context = ssl.create_default_context()
         client = aioimaplib.IMAP4_SSL(host=config.IMAP_HOST, port=config.IMAP_PORT, ssl_context=ssl_context)
@@ -127,6 +214,9 @@ async def list_emails(folder: str = "INBOX", limit: int = 10, sender: str | None
         sender: Optional sender email address to filter by (FROM "email").
         to: Optional recipient email address to filter by (TO "email").
     """
+    if not config.is_configured:
+        return [{"error": "Server not configured. Please use `configure_email` first."}]
+
     try:
         ssl_context = ssl.create_default_context()
         client = aioimaplib.IMAP4_SSL(host=config.IMAP_HOST, port=config.IMAP_PORT, ssl_context=ssl_context)
@@ -236,6 +326,9 @@ async def read_email(email_id: str, folder: str = "INBOX") -> str:
     Returns:
         Full text body (HTML stripped to Markdown).
     """
+    if not config.is_configured:
+        return "Error: Server not configured. Please use `configure_email` first."
+
     try:
         ssl_context = ssl.create_default_context()
         client = aioimaplib.IMAP4_SSL(host=config.IMAP_HOST, port=config.IMAP_PORT, ssl_context=ssl_context)
@@ -290,6 +383,9 @@ async def draft_email(to_recipients: list[str], subject: str, body_text: str) ->
         subject: Email subject.
         body_text: Body content (text).
     """
+    if not config.is_configured:
+        return "Error: Server not configured. Please use `configure_email` first."
+
     try:
         # Create Message
         msg = MIMEMultipart()
@@ -346,6 +442,9 @@ async def send_email(to_recipients: list[str], subject: str, body_text: str, cc_
         body_text: Body content (text).
         cc_recipients: Optional list of CC addresses.
     """
+    if not config.is_configured:
+        return "Error: Server not configured. Please use `configure_email` first."
+
     try:
         msg = EmailMessage()
         msg['From'] = config.EMAIL_USER
