@@ -1,0 +1,29 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+
+# Environment/Secrets
+.env
+credentials.json
+inspect_mcp.txt
+
+# Documentation & Config
+PRD.md
+README.md
+docker-compose.yml
+coolify.yaml
+
+# IDE
+.vscode
+.idea

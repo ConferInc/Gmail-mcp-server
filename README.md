@@ -19,7 +19,7 @@ Follow these steps to set up the Email MCP server.
 
 1.  **Clone the repository**:
     ```bash
-    git clone https://github.com/ConferInc/Gmail-mcp-server.git
+    git clone <your-repo-url>
     cd "Custom email MCP"
     ```
 
