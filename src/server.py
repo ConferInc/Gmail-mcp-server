@@ -8,7 +8,12 @@ import aioimaplib
 import secrets
 from pathlib import Path
 from starlette.responses import HTMLResponse, JSONResponse
+
 from starlette.requests import Request
+from starlette.applications import Starlette
+from starlette.routing import Route
+import uvicorn
+import threading
 from fastmcp import FastMCP
 
 
@@ -31,21 +36,23 @@ mcp = FastMCP("Custom Email MCP")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Global reference to HTTP server to allow shutdown
+http_server = None
+
 # Security: Generate a random token for the setup link
 SETUP_TOKEN = secrets.token_urlsafe(16)
 logger.debug("Setup token generated (length=%d)", len(SETUP_TOKEN))
 
+def get_setup_url() -> str:
+    base_url = config.APP_URL or "http://localhost:8000"
+    return f"{base_url.rstrip('/')}/setup?token={SETUP_TOKEN}"
 
 @mcp.tool()
 async def get_configuration_link() -> str:
     """
     Returns a secure link to configure the server via browser.
     """
-    base_url = config.APP_URL or "http://localhost:8000"
-    # Remove trailing slash if present
-    base_url = base_url.rstrip("/")
-    
-    link = f"{base_url}/setup?token={SETUP_TOKEN}"
+    link = get_setup_url()
     
     if not config.APP_URL:
         return f"Link: {link} \n(Note: Set APP_URL env var in Coolify to your domain to get a correct public link)"
@@ -84,7 +91,27 @@ async def handle_setup(request: Request):
             email_user=form_data.get("email_user"),
             email_pass=form_data.get("email_pass")
         )
-        return HTMLResponse("<h1>Configuration Saved!</h1><p>You can close this window and start using the agent.</p>")
+        
+        # Load success template
+        template_path = Path(__file__).parent / "templates" / "success.html"
+        try:
+            html_content = template_path.read_text(encoding="utf-8")
+            
+            # Schedule server shutdown
+            if http_server:
+                async def shutdown():
+                    await asyncio.sleep(3)
+                    logger.info("Configuration complete. Shutting down HTTP server...")
+                    http_server.should_exit = True
+                
+                # Create task in the current loop (which is the HTTP server's loop)
+                asyncio.create_task(shutdown())
+                
+            return HTMLResponse(html_content)
+        except Exception as e:
+            logger.error(f"Success template parsing error: {e}")
+            return HTMLResponse("<h1>Configuration Saved!</h1><p>You can close this window.</p>")
+
     except Exception as e:
         return HTMLResponse(f"<h1>Error</h1><p>{e}</p>", status_code=500)
 
@@ -114,7 +141,7 @@ async def check_connection() -> dict:
     Returns a dictionary with status checks and latency stats.
     """
     if not config.is_configured:
-        return {"error": "Server not configured. Please use `configure_email` first."}
+        return {"error": f"Server not configured. Configure at {get_setup_url()} or use `configure_email`."}
 
     results = {
         "smtp": {"status": "pending", "host": config.SMTP_HOST},
@@ -175,7 +202,7 @@ async def list_folders() -> list[dict]:
         List of dictionaries containing 'name' and 'flags' for each folder.
     """
     if not config.is_configured:
-        return [{"error": "Server not configured. Please use `configure_email` first."}]
+        return [{"error": f"Server not configured. Configure at {get_setup_url()} or use `configure_email`."}]
 
     try:
         ssl_context = ssl.create_default_context()
@@ -202,7 +229,7 @@ async def list_folders() -> list[dict]:
         return [{"error": str(e)}]
 
 @mcp.tool()
-async def list_emails(folder: str = "INBOX", limit: int = 10, sender: str | None = None, to: str | None = None) -> list[dict]:
+async def list_emails(folder: str = "INBOX", limit: int = 10, sender: str | None = None, to: str | None = None, include_body: bool = False) -> list[dict]:
     """
     Fetches email metadata from a specific folder.
     
@@ -211,9 +238,10 @@ async def list_emails(folder: str = "INBOX", limit: int = 10, sender: str | None
         limit: Max number of emails to return (default=10).
         sender: Optional sender email address to filter by (FROM "email").
         to: Optional recipient email address to filter by (TO "email").
+        include_body: If True, fetches and returns the full email body for each email.
     """
     if not config.is_configured:
-        return [{"error": "Server not configured. Please use `configure_email` first."}]
+        return [{"error": f"Server not configured. Configure at {get_setup_url()} or use `configure_email`."}]
 
     try:
         ssl_context = ssl.create_default_context()
@@ -264,7 +292,6 @@ async def list_emails(folder: str = "INBOX", limit: int = 10, sender: str | None
         email_ids = data[0].split()
         
         # Taking the last 'limit' emails (most recent if server appends new ones at end)
-        # Usually IMAP sequence numbers increase with time.
         start_index = max(0, len(email_ids) - limit)
         recent_ids = email_ids[start_index:]
         
@@ -276,34 +303,56 @@ async def list_emails(folder: str = "INBOX", limit: int = 10, sender: str | None
             # Decode bytes to string for fetch command
             e_id_str = e_id.decode() if isinstance(e_id, bytes) else str(e_id)
             
-            # Fetch envelope (headers)
-            status, info = await client.fetch(e_id_str, '(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])')
-            
-            if status == 'OK':
-                # aioimaplib returns: [command_line, header_content (bytearray), closing_paren, completion]
-                # The actual header content is at index 1 as bytes or bytearray
-                raw_header = b""
-                if len(info) >= 2:
-                    header_data = info[1]
-                    if isinstance(header_data, (bytes, bytearray)):
-                        raw_header = bytes(header_data)
+            if include_body:
+                # Fetch full content if requested
+                status, info = await client.fetch(e_id_str, '(RFC822)')
+                if status == 'OK':
+                    raw_email = b""
+                    for part in info:
+                         if isinstance(part, (bytes, bytearray)):
+                             part_bytes = bytes(part)
+                             if b"RFC822" in part_bytes and part_bytes.strip().endswith(b"}"):
+                                 continue
+                             if part_bytes.strip() == b")":
+                                 continue
+                             raw_email += part_bytes
+                    
+                    msg = email.message_from_bytes(raw_email, policy=default)
+                    subject = msg.get("subject", "No Subject")
+                    sender_val = msg.get("from", "Unknown")
+                    date = msg.get("date", "Unknown")
+                    body = extract_email_body(msg)
+                    
+                    emails.append({
+                        "id": e_id_str,
+                        "sender": str(sender_val),
+                        "subject": str(subject),
+                        "date": str(date),
+                        "body": body
+                    })
+            else:
+                # Fetch only headers (original behavior)
+                status, info = await client.fetch(e_id_str, '(BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE)])')
                 
-                # Parse header
-                msg = email.message_from_bytes(raw_header, policy=default)
-                
-                subject = msg.get("subject", "No Subject")
-                sender = msg.get("from", "Unknown")
-                date = msg.get("date", "Unknown")
-                
-                # Decode subject if necessary (though policy=default handles most)
-
-
-                emails.append({
-                    "id": e_id_str,
-                    "sender": str(sender),
-                    "subject": str(subject),
-                    "date": str(date)
-                })
+                if status == 'OK':
+                    raw_header = b""
+                    if len(info) >= 2:
+                        header_data = info[1]
+                        if isinstance(header_data, (bytes, bytearray)):
+                            raw_header = bytes(header_data)
+                    
+                    msg = email.message_from_bytes(raw_header, policy=default)
+                    
+                    subject = msg.get("subject", "No Subject")
+                    sender_val = msg.get("from", "Unknown")
+                    date = msg.get("date", "Unknown")
+                    
+                    emails.append({
+                        "id": e_id_str,
+                        "sender": str(sender_val),
+                        "subject": str(subject),
+                        "date": str(date)
+                    })
 
         await client.logout()
         return emails
@@ -325,7 +374,7 @@ async def read_email(email_id: str, folder: str = "INBOX") -> str:
         Full text body (HTML stripped to Markdown).
     """
     if not config.is_configured:
-        return "Error: Server not configured. Please use `configure_email` first."
+        return f"Error: Server not configured. Configure at {get_setup_url()} or use `configure_email`."
 
     try:
         ssl_context = ssl.create_default_context()
@@ -380,7 +429,7 @@ async def draft_email(to_recipients: list[str], subject: str, body_text: str) ->
         body_text: Body content (text).
     """
     if not config.is_configured:
-        return "Error: Server not configured. Please use `configure_email` first."
+        return f"Error: Server not configured. Configure at {get_setup_url()} or use `configure_email`."
 
     try:
         # Create Message
@@ -439,7 +488,7 @@ async def send_email(to_recipients: list[str], subject: str, body_text: str, cc_
         cc_recipients: Optional list of CC addresses.
     """
     if not config.is_configured:
-        return "Error: Server not configured. Please use `configure_email` first."
+        return f"Error: Server not configured. Configure at {get_setup_url()} or use `configure_email`."
 
     try:
         msg = EmailMessage()
@@ -499,5 +548,75 @@ async def send_email(to_recipients: list[str], subject: str, body_text: str, cc_
         return f"Error sending email: {str(e)}"
 
 
+
+@mcp.prompt()
+def daily_digest() -> list[dict]:
+    """
+    Summarize emails from the last 24 hours.
+    """
+    return [
+        {
+            "role": "user",
+            "content": """Please fetch the emails from the last 24 hours using the `list_emails` tool (limit to 20-30 to be safe). 
+            
+Instructions:
+1. List the emails from the Inbox.
+2. Summarize the important ones into categories:
+   - 🔴 Action Required (urgent, direct questions)
+   - 🟡 Informational (updates, newsletters)
+   - 🟢 Personal/Casual
+3. Ignore clearly spam or promotional junk if possible.
+4. Provide a bulleted summary of the day."""
+        }
+    ]
+
+@mcp.prompt()
+def meeting_hunter() -> list[dict]:
+    """
+    Find all scheduling and meeting requests from the last few days.
+    """
+    return [
+        {
+            "role": "user",
+            "content": """Please scan my recent emails for any meeting requests, scheduling conflicts, or calendar invites.
+
+Instructions:
+1. Call `list_emails` for the last 50 emails.
+2. Look for keywords like "zoom", "meet", "schedule", "calendar", "time", "invite".
+3. List them out for me in a table with:
+   - Sender
+   - Subject
+   - Proposed Time (if found)
+   - Action Needed (e.g. "Reply to confirm", "No action")"""
+        }
+    ]
+
+
 if __name__ == "__main__":
+    # Create a separate Starlette app for the setup page
+    # This allows us to serve the web interface on port 8000 while the MCP server runs on stdio
+    web_routes = [
+        Route("/setup", setup_page, methods=["GET"]),
+        Route("/setup", handle_setup, methods=["POST"]),
+    ]
+    web_app = Starlette(routes=web_routes)
+
+    def run_http_server():
+        global http_server
+        try:
+            # Run uvicorn with minimal logging to avoid interfering with stdio MCP protocol
+            # Use Server object to allow shutdown
+            config = uvicorn.Config(web_app, host="0.0.0.0", port=8000, log_level="critical")
+            http_server = uvicorn.Server(config)
+            http_server.run()
+        except Exception as e:
+            logger.error(f"Failed to start HTTP server: {e}")
+
+    # Start HTTP server in a background thread
+    http_thread = threading.Thread(target=run_http_server, daemon=True)
+    http_thread.start()
+    
+    logger.info("HTTP Setup Server running on http://localhost:8000/setup")
+    
+    # Run the MCP server (blocking)
     mcp.run()
